@@ -59,6 +59,82 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./admin/package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Notify Slack
+        run: |
+          DEPLOY_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          APP_URL="https://klaushofrichter.github.io/een-oauth-proxy"
+
+          curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d @- << EOF
+          {
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "🌐 Admin App Deployed to Production",
+                  "emoji": true
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Version:*\n${{ steps.version.outputs.version }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Deployed:*\n${DEPLOY_TIME}"
+                  }
+                ]
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*Application URL:*\n<${APP_URL}|${APP_URL}>"
+                }
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "🔗 Open App",
+                      "emoji": true
+                    },
+                    "url": "${APP_URL}",
+                    "style": "primary"
+                  }
+                ]
+              },
+              {
+                "type": "context",
+                "elements": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "Deployed via GitHub Actions • Workflow: Deploy Admin to GitHub Pages"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          echo "✅ Slack notification sent"

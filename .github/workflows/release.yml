@@ -76,6 +76,91 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Notify Slack
+        if: steps.check_release.outputs.exists == 'false'
+        run: |
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${{ steps.versions.outputs.release_tag }}"
+          RELEASE_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d @- << EOF
+          {
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "🚀 New Release: EEN OAuth Proxy ${{ steps.versions.outputs.release_tag }}",
+                  "emoji": true
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Admin Version:*\n${{ steps.versions.outputs.admin_version }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Proxy Version:*\n${{ steps.versions.outputs.proxy_version }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Released:*\n${RELEASE_TIME}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Repository:*\n${{ github.repository }}"
+                  }
+                ]
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*Deployed URLs:*\n• <https://klaushofrichter.github.io/een-oauth-proxy|Admin App>\n• <https://een-oauth-proxy.klaushofrichter.workers.dev|OAuth Proxy>"
+                }
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "📦 View Release",
+                      "emoji": true
+                    },
+                    "url": "${RELEASE_URL}",
+                    "style": "primary"
+                  },
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "📋 Release Notes",
+                      "emoji": true
+                    },
+                    "url": "${RELEASE_URL}"
+                  }
+                ]
+              },
+              {
+                "type": "context",
+                "elements": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "Triggered by GitHub Actions • Workflow: Create Release"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          echo "✅ Slack notification sent"
+
       - name: Summary
         run: |
           if [ "${{ steps.check_release.outputs.exists }}" == "true" ]; then
