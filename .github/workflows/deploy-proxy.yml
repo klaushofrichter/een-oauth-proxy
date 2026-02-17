@@ -60,11 +60,11 @@ jobs:
 
       - name: Check if deployment needed
         id: check
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+          DEPLOYED_VERSION: ${{ steps.deployed.outputs.deployed_version }}
+          FORCE_DEPLOY: ${{ inputs.force_deploy }}
         run: |
-          PACKAGE_VERSION="${{ steps.version.outputs.version }}"
-          DEPLOYED_VERSION="${{ steps.deployed.outputs.deployed_version }}"
-          FORCE_DEPLOY="${{ inputs.force_deploy }}"
-
           if [ "$FORCE_DEPLOY" = "true" ]; then
             echo "::warning::Force deploy requested - bypassing version check"
             echo "should_deploy=true" >> $GITHUB_OUTPUT
@@ -78,10 +78,13 @@ jobs:
 
       - name: Skip deployment (versions match)
         if: steps.check.outputs.should_deploy == 'false'
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+          DEPLOYED_VERSION: ${{ steps.deployed.outputs.deployed_version }}
         run: |
           echo "## Deployment Skipped" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Package version (${{ steps.version.outputs.version }}) matches deployed version (${{ steps.deployed.outputs.deployed_version }})." >> $GITHUB_STEP_SUMMARY
+          echo "Package version ($PACKAGE_VERSION) matches deployed version ($DEPLOYED_VERSION)." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Use **force_deploy** input to deploy anyway (use with caution)." >> $GITHUB_STEP_SUMMARY
 
@@ -128,28 +131,35 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SECRET_CLIENT_ID: ${{ secrets.VITE_EEN_CLIENT_ID }}
+          SECRET_CLIENT_SECRET: ${{ secrets.EEN_CLIENT_SECRET }}
+          SECRET_ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
+          SECRET_ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS }}
+          SECRET_ALLOWED_API_DOMAINS: ${{ secrets.ALLOWED_API_DOMAINS }}
+          SECRET_REFRESH_TOKEN_TTL: ${{ secrets.REFRESH_TOKEN_TTL }}
+          SECRET_MAX_KV_KEYS: ${{ secrets.MAX_KV_KEYS }}
         run: |
           cd proxy
           echo "Setting CLIENT_ID..."
-          printf '%s' "${{ secrets.VITE_EEN_CLIENT_ID }}" | npx wrangler secret put CLIENT_ID
+          printf '%s' "$SECRET_CLIENT_ID" | npx wrangler secret put CLIENT_ID
 
           echo "Setting CLIENT_SECRET..."
-          printf '%s' "${{ secrets.EEN_CLIENT_SECRET }}" | npx wrangler secret put CLIENT_SECRET
+          printf '%s' "$SECRET_CLIENT_SECRET" | npx wrangler secret put CLIENT_SECRET
 
           echo "Setting ADMIN_EMAILS..."
-          printf '%s' "${{ secrets.ADMIN_EMAILS }}" | npx wrangler secret put ADMIN_EMAILS
+          printf '%s' "$SECRET_ADMIN_EMAILS" | npx wrangler secret put ADMIN_EMAILS
 
           echo "Setting ALLOWED_ORIGINS..."
-          printf '%s' "${{ secrets.ALLOWED_ORIGINS }}" | npx wrangler secret put ALLOWED_ORIGINS
+          printf '%s' "$SECRET_ALLOWED_ORIGINS" | npx wrangler secret put ALLOWED_ORIGINS
 
           echo "Setting ALLOWED_API_DOMAINS..."
-          printf '%s' "${{ secrets.ALLOWED_API_DOMAINS }}" | npx wrangler secret put ALLOWED_API_DOMAINS
+          printf '%s' "$SECRET_ALLOWED_API_DOMAINS" | npx wrangler secret put ALLOWED_API_DOMAINS
 
           echo "Setting REFRESH_TOKEN_TTL..."
-          printf '%s' "${{ secrets.REFRESH_TOKEN_TTL }}" | npx wrangler secret put REFRESH_TOKEN_TTL
+          printf '%s' "$SECRET_REFRESH_TOKEN_TTL" | npx wrangler secret put REFRESH_TOKEN_TTL
 
           echo "Setting MAX_KV_KEYS..."
-          printf '%s' "${{ secrets.MAX_KV_KEYS }}" | npx wrangler secret put MAX_KV_KEYS
+          printf '%s' "$SECRET_MAX_KV_KEYS" | npx wrangler secret put MAX_KV_KEYS
 
       - name: Store deploy version in KV
         if: steps.check.outputs.should_deploy == 'true'
@@ -157,10 +167,11 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           cd proxy
           DEPLOY_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          VERSION_STRING="een-oauth-proxy - ${{ steps.version.outputs.version }} - $DEPLOY_TIME"
+          VERSION_STRING="een-oauth-proxy - ${PACKAGE_VERSION} - $DEPLOY_TIME"
           # Get namespace ID from wrangler.toml (look for id within 10 lines after kv_namespaces section)
           NAMESPACE_ID=$(grep -A 10 '\[\[kv_namespaces\]\]' wrangler.toml | grep 'id = "' | head -1 | sed 's/.*id = "\([^"]*\)".*/\1/')
           # Validate namespace ID was found and has correct format (32-char hex)
@@ -179,11 +190,13 @@ jobs:
       - name: Wait for deployment propagation
         if: steps.check.outputs.should_deploy == 'true'
         id: wait_propagation
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Poll health endpoint until version matches or timeout (exponential backoff)
           # Note: Health endpoint returns full version string like "een-oauth-proxy - 1.2.37 - timestamp"
           # so we check if the expected version number is contained in the response
-          EXPECTED_VERSION="${{ steps.version.outputs.version }}"
+          EXPECTED_VERSION="$PACKAGE_VERSION"
           MAX_ATTEMPTS=6
           WAIT_TIME=5
 
@@ -216,6 +229,14 @@ jobs:
       - name: Check rollback conditions
         if: always() && steps.check.outputs.should_deploy == 'true'
         id: rollback_check
+        env:
+          DEPLOY_SUCCEEDED: ${{ steps.deploy.outputs.deployed == 'true' }}
+          SECRETS_FAILED: ${{ steps.set_secrets.outcome == 'failure' }}
+          STORE_VERSION_FAILED: ${{ steps.store_version.outcome == 'failure' }}
+          PROPAGATION_FAILED: ${{ steps.wait_propagation.outcome == 'failure' }}
+          VERIFY_FAILED: ${{ steps.verify.outcome == 'failure' }}
+          DEPLOYMENT_COMPLETE: ${{ steps.store_version.outputs.deployment_complete == 'true' }}
+          HAS_PREVIOUS: ${{ steps.current_deployment.outputs.has_previous_version == 'true' }}
         run: |
           # Determine if rollback should be attempted
           # Rollback triggers if deploy succeeded but any post-deployment step failed:
@@ -224,13 +245,6 @@ jobs:
           # - propagation wait failed, OR
           # - verification failed, OR
           # - deployment_complete flag not set
-          DEPLOY_SUCCEEDED="${{ steps.deploy.outputs.deployed == 'true' }}"
-          SECRETS_FAILED="${{ steps.set_secrets.outcome == 'failure' }}"
-          STORE_VERSION_FAILED="${{ steps.store_version.outcome == 'failure' }}"
-          PROPAGATION_FAILED="${{ steps.wait_propagation.outcome == 'failure' }}"
-          VERIFY_FAILED="${{ steps.verify.outcome == 'failure' }}"
-          DEPLOYMENT_COMPLETE="${{ steps.store_version.outputs.deployment_complete == 'true' }}"
-          HAS_PREVIOUS="${{ steps.current_deployment.outputs.has_previous_version == 'true' }}"
 
           echo "Deploy succeeded: $DEPLOY_SUCCEEDED"
           echo "Secrets failed: $SECRETS_FAILED"
@@ -266,9 +280,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ROLLBACK_VERSION: ${{ steps.current_deployment.outputs.version_id }}
         run: |
           cd proxy
-          ROLLBACK_VERSION="${{ steps.current_deployment.outputs.version_id }}"
           echo "::error::Verification failed! Rolling back to version: $ROLLBACK_VERSION"
           npx wrangler versions deploy "$ROLLBACK_VERSION" --yes
           echo "rollback_performed=true" >> $GITHUB_OUTPUT
@@ -298,11 +312,14 @@ jobs:
 
       - name: Deployment summary
         if: steps.check.outputs.should_deploy == 'true' && success()
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+          DEPLOYED_VERSION: ${{ steps.deployed.outputs.deployed_version }}
         run: |
           echo "## Proxy Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Previous:** ${{ steps.deployed.outputs.deployed_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** $PACKAGE_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "**Previous:** $DEPLOYED_VERSION" >> $GITHUB_STEP_SUMMARY
           echo "**Worker:** een-oauth-proxy" >> $GITHUB_STEP_SUMMARY
           echo "**URL:** $PROXY_URL" >> $GITHUB_STEP_SUMMARY
 
@@ -311,87 +328,55 @@ jobs:
         continue-on-error: true
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # Use env var to prevent webhook URL exposure in error output
-          # Note: Admin App URL is /een-oauth-proxy (not /een-oauth-proxy/admin/) - GitHub Pages serves it from base path
-          curl -sf -X POST "$SLACK_WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "Proxy Deployed to Cloudflare",
-                    "emoji": true
-                  }
-                },
-                {
-                  "type": "section",
-                  "fields": [
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Version:*\n${{ steps.version.outputs.version }}"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Status:*\n:white_check_mark: Success"
-                    }
-                  ]
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "Health Check"
-                      },
-                      "url": "'"$PROXY_URL"'/health"
-                    },
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "Admin App"
-                      },
-                      "url": "https://klaushofrichter.github.io/een-oauth-proxy"
-                    },
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "View Workflow"
-                      },
-                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    }
-                  ]
-                }
+          # Build JSON safely using jq to prevent injection via special characters
+          WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          jq -n \
+            --arg version "$PACKAGE_VERSION" \
+            --arg health_url "${PROXY_URL}/health" \
+            --arg workflow_url "$WORKFLOW_URL" \
+            '{
+              blocks: [
+                {type: "header", text: {type: "plain_text", text: "Proxy Deployed to Cloudflare", emoji: true}},
+                {type: "section", fields: [
+                  {type: "mrkdwn", text: ("*Version:*\n" + $version)},
+                  {type: "mrkdwn", text: "*Status:*\n:white_check_mark: Success"}
+                ]},
+                {type: "actions", elements: [
+                  {type: "button", text: {type: "plain_text", text: "Health Check"}, url: $health_url},
+                  {type: "button", text: {type: "plain_text", text: "Admin App"}, url: "https://klaushofrichter.github.io/een-oauth-proxy"},
+                  {type: "button", text: {type: "plain_text", text: "View Workflow"}, url: $workflow_url}
+                ]}
               ]
-            }'
+            }' | curl -sf -X POST "$SLACK_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d @-
 
       - name: Notify Slack on failure
         if: failure()
         continue-on-error: true
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+          ROLLBACK_PERFORMED: ${{ steps.rollback.outputs.rollback_performed }}
+          PREVIOUS_VERSION_ID: ${{ steps.current_deployment.outputs.version_id }}
+          HAS_PREVIOUS_VERSION: ${{ steps.current_deployment.outputs.has_previous_version }}
         run: |
           set -o pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          VERSION="${VERSION:-unknown}"
+          VERSION="${PACKAGE_VERSION:-unknown}"
           ROLLBACK_STATUS=""
-          if [ "${{ steps.rollback.outputs.rollback_performed }}" = "true" ]; then
-            ROLLBACK_STATUS=" (rolled back to ${{ steps.current_deployment.outputs.version_id }})"
-          elif [ "${{ steps.current_deployment.outputs.has_previous_version }}" != "true" ]; then
+          if [ "$ROLLBACK_PERFORMED" = "true" ]; then
+            ROLLBACK_STATUS=" (rolled back to ${PREVIOUS_VERSION_ID})"
+          elif [ "$HAS_PREVIOUS_VERSION" != "true" ]; then
             ROLLBACK_STATUS=" (rollback not possible - no previous version)"
           fi
           # Build JSON safely using jq to prevent injection via special characters
-          # Use env var to prevent webhook URL exposure in error output
+          WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           jq -n \
             --arg title "Proxy Deployment Failed${ROLLBACK_STATUS}" \
             --arg version "$VERSION" \
-            --arg url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --arg url "$WORKFLOW_URL" \
             '{
               blocks: [
                 {type: "header", text: {type: "plain_text", text: $title, emoji: true}},
