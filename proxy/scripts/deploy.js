@@ -46,6 +46,7 @@ console.log('')
 function run(command, options = {}) {
   console.log(`> ${command}`)
   try {
+    // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process — `command` callers are hardcoded strings within this script, not user input
     execSync(command, {
       cwd: projectRoot,
       stdio: 'inherit',
@@ -59,6 +60,7 @@ function run(command, options = {}) {
 
 function runSilent(command) {
   try {
+    // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process — `command` callers are hardcoded strings within this script, not user input
     return execSync(command, {
       cwd: projectRoot,
       encoding: 'utf-8'

@@ -12,7 +12,8 @@
     "test:admin": "cd admin && npm test",
     "deploy:pages": "./scripts/deploy-pages.sh",
     "deploy:proxy": "cd proxy && npm run deploy",
-    "build:presentation": "node scripts/generate-presentation.js && test -f PRESENTATION.md && marp PRESENTATION.md -o PRESENTATION.html"
+    "build:presentation": "node scripts/generate-presentation.js && test -f PRESENTATION.md && marp PRESENTATION.md -o PRESENTATION.html",
+    "gate": "bash scripts/security-gate.sh"
   },
   "devDependencies": {
     "@marp-team/marp-cli": "^4.2.3",
