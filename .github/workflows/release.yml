@@ -158,6 +158,8 @@ jobs:
           RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
           ADMIN_VERSION: ${{ steps.versions.outputs.admin_version }}
           PROXY_VERSION: ${{ steps.versions.outputs.proxy_version }}
+          ADMIN_URL: ${{ vars.VITE_REDIRECT_URI }}
+          PROXY_URL: ${{ vars.VITE_PROXY_URL }}
         run: |
           set -e
 
@@ -189,8 +191,8 @@ jobs:
             echo "- \`${ARCHIVE_NAME}.tar.gz\` - TAR.GZ archive"
             echo ""
             echo "### Deployed URLs"
-            echo "- **Admin App:** ${{ vars.VITE_REDIRECT_URI }}"
-            echo "- **Proxy:** ${{ vars.VITE_PROXY_URL }}"
+            echo "- **Admin App:** ${ADMIN_URL}"
+            echo "- **Proxy:** ${PROXY_URL}"
           } > release_notes.md
 
           echo "📝 Release notes:"
@@ -216,7 +218,10 @@ jobs:
           RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
           PROXY_VERSION: ${{ steps.versions.outputs.proxy_version }}
           ADMIN_VERSION: ${{ steps.versions.outputs.admin_version }}
+          ADMIN_URL: ${{ vars.VITE_REDIRECT_URI }}
+          PROXY_URL: ${{ vars.VITE_PROXY_URL }}
         run: |
+          set -o pipefail
           RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
           RELEASE_TIME=$(TZ='America/Chicago' date +"%Y-%m-%d %H:%M:%S CT")
 
@@ -228,8 +233,8 @@ jobs:
             --arg release_time "$RELEASE_TIME" \
             --arg repo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --arg repo_name "$GITHUB_REPOSITORY" \
-            --arg admin_url "${{ vars.VITE_REDIRECT_URI }}" \
-            --arg proxy_url "${{ vars.VITE_PROXY_URL }}" \
+            --arg admin_url "$ADMIN_URL" \
+            --arg proxy_url "$PROXY_URL" \
             --arg release_url "$RELEASE_URL" \
             '{
               blocks: [

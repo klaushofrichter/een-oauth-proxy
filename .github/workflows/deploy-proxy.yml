@@ -330,6 +330,7 @@ jobs:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
+          set -o pipefail
           # Build JSON safely using jq to prevent injection via special characters
           WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           jq -n \
