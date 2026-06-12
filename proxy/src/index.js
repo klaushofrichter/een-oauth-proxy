@@ -344,10 +344,12 @@ export default {
     if (!corsResult.valid) {
       // Echo the rejected origin in CORS headers so the calling page can read
       // this rejection instead of a generic CORS failure. This grants nothing:
-      // the body is static and every request re-validates the origin.
+      // every request re-validates the origin, and validateOrigin only rejects
+      // non-empty origins, so origin is always set here.
+      // SECURITY: keep this body static - it is readable cross-origin with credentials
       return addCorsHeaders(
         new Response('Forbidden: Invalid origin', { status: 403 }),
-        origin || '*',
+        origin,
         env
       )
     }
@@ -1296,6 +1298,8 @@ function getCorsHeaders(origin, env = null) {
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, Cookie',
     'Access-Control-Max-Age': '86400',
+    // Responses differ per Origin, so caches must key on it
+    'Vary': 'Origin',
     // Security headers
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
