@@ -8,7 +8,7 @@
  * 4. Token refresh and direct login with refreshed token
  */
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import {
   navigateToLogin,
   loginWithEEN,
@@ -262,9 +262,14 @@ test.describe('Authentication Flows', () => {
     console.log('\n✅ Old token behavior test completed!\n')
   })
 
-  test('should fail login if OAuth state is invalid (CSRF protection)', async ({ page }) => {
-    console.log('\n▶️ Running Test: Invalid OAuth state (CSRF)\n')
-    test.setTimeout(MAX_TEST_TIMEOUT)
+  test.describe('with expected OAuth state rejection', () => {
+    // This test deliberately presents an invalid OAuth state; the app logs
+    // the rejection via console.error, which is the behavior under test
+    test.use({ allowedConsoleErrors: [/Invalid OAuth state/] })
+
+    test('should fail login if OAuth state is invalid (CSRF protection)', async ({ page }) => {
+      console.log('\n▶️ Running Test: Invalid OAuth state (CSRF)\n')
+      test.setTimeout(MAX_TEST_TIMEOUT)
 
     // Step 1: Inject a known 'state' into sessionStorage, simulating the start of a login flow
     await page.goto('/')
@@ -346,5 +351,6 @@ test.describe('Authentication Flows', () => {
     console.log('✅ Confirmed not redirected to profile')
 
     console.log('\n✅ Missing state protection test completed!\n')
+  })
   })
 })

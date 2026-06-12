@@ -73,6 +73,20 @@ run_test_contains() {
   fi
 }
 
+run_test_not_contains() {
+  local test_name="$1"
+  local needle="$2"
+  local haystack="$3"
+
+  if echo "$haystack" | grep -qi "$needle"; then
+    [ "$BRIEF" = "1" ] && echo -e "${RED}✗${NC} $test_name" || echo -e "   ${RED}❌ FAILED${NC} - $test_name (unexpected: $needle)"
+    ((FAILED++)) || true
+  else
+    [ "$BRIEF" = "1" ] && echo -e "${GREEN}✓${NC} $test_name" || echo -e "   ${GREEN}✅ PASSED${NC} - $test_name"
+    ((PASSED++)) || true
+  fi
+}
+
 if [ "$BRIEF" = "1" ]; then
   echo -e "${BLUE}Production Proxy Tests${NC} - $PROXY_URL"
 else
@@ -120,12 +134,26 @@ run_test_contains "X-Content-Type-Options header" "x-content-type-options" "$SEC
 run_test_contains "X-Frame-Options header" "x-frame-options" "$SECURITY_HEADERS"
 run_test_contains "Content-Security-Policy header" "content-security-policy" "$SECURITY_HEADERS"
 run_test_contains "Referrer-Policy header" "referrer-policy" "$SECURITY_HEADERS"
+# HSTS is only set outside development, so production is the only place to test it
+run_test_contains "Strict-Transport-Security header" "strict-transport-security" "$SECURITY_HEADERS"
+run_test_contains "Vary: Origin header" "vary: origin" "$SECURITY_HEADERS"
 
 # 5. Reject Invalid Origin
 [ "$BRIEF" != "1" ] && echo -e "\n${BLUE}5. Reject Invalid Origin${NC}"
 INVALID_ORIGIN=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$PROXY_URL/health" \
   -H "Origin: https://malicious-site.com" 2>/dev/null || echo "000")
 run_test "Invalid origin rejected" "403" "$INVALID_ORIGIN"
+
+# The 403 must be readable by the calling page (issue #125): CORS headers echo
+# the rejected origin, and the body must stay the exact static string - it is
+# readable cross-origin with credentials, so any dynamic content would leak
+INVALID_ORIGIN_HEADERS=$(curl -s -i --max-time 10 "$PROXY_URL/health" \
+  -H "Origin: https://malicious-site.com" 2>/dev/null || echo "")
+run_test_contains "403 echoes rejected origin in ACAO" "access-control-allow-origin: https://malicious-site.com" "$INVALID_ORIGIN_HEADERS"
+run_test_contains "403 includes Vary: Origin" "vary: origin" "$INVALID_ORIGIN_HEADERS"
+INVALID_ORIGIN_BODY=$(curl -s --max-time 10 "$PROXY_URL/health" \
+  -H "Origin: https://malicious-site.com" 2>/dev/null || echo "")
+run_test "403 body is the exact static string" "Forbidden: Invalid origin" "$INVALID_ORIGIN_BODY"
 
 # 6. Missing Session Returns 401
 [ "$BRIEF" != "1" ] && echo -e "\n${BLUE}6. Authentication - Missing Session${NC}"
@@ -168,6 +196,37 @@ run_test "getAccessToken endpoint exists (400 without params)" "400" "$OAUTH_GET
 OAUTH_REVOKE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X POST "$PROXY_URL/proxy/revoke" \
   -H "Origin: $ALLOWED_ORIGIN" 2>/dev/null || echo "000")
 run_test "revoke endpoint exists (401 without session)" "401" "$OAUTH_REVOKE"
+
+# 11. CSRF Protection - POST Without Origin
+[ "$BRIEF" != "1" ] && echo -e "\n${BLUE}11. CSRF Protection - POST Without Origin${NC}"
+CSRF_RESPONSE=$(curl -s -i --max-time 10 -X POST "$PROXY_URL/proxy/getAccessToken" 2>/dev/null || echo "")
+CSRF_STATUS=$(echo "$CSRF_RESPONSE" | head -1 | grep -oE '[0-9]{3}' | head -1)
+run_test "POST without Origin rejected" "403" "$CSRF_STATUS"
+# The wildcard lets a stripped-Origin client read the explanation, but
+# credentials must never be allowed together with a wildcard origin
+run_test_contains "CSRF 403 has wildcard ACAO" "access-control-allow-origin: \*" "$CSRF_RESPONSE"
+run_test_not_contains "CSRF 403 has no Allow-Credentials" "access-control-allow-credentials" "$CSRF_RESPONSE"
+
+# 12. Preflight From Disallowed Origin
+[ "$BRIEF" != "1" ] && echo -e "\n${BLUE}12. Preflight From Disallowed Origin${NC}"
+BAD_PREFLIGHT=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X OPTIONS "$PROXY_URL/proxy/getAccessToken" \
+  -H "Origin: https://malicious-site.com" \
+  -H "Access-Control-Request-Method: POST" 2>/dev/null || echo "000")
+run_test "Preflight from disallowed origin rejected" "403" "$BAD_PREFLIGHT"
+
+# 13. Token Responses Are Not Cacheable (RFC 6749 Section 5.1)
+[ "$BRIEF" != "1" ] && echo -e "\n${BLUE}13. Token Responses Not Cacheable${NC}"
+REFRESH_401=$(curl -s -i --max-time 10 -X POST "$PROXY_URL/proxy/refreshAccessToken" \
+  -H "Origin: $ALLOWED_ORIGIN" 2>/dev/null || echo "")
+run_test_contains "Refresh 401 has Cache-Control: no-store" "cache-control: no-store" "$REFRESH_401"
+run_test_contains "Refresh 401 has Pragma: no-cache" "pragma: no-cache" "$REFRESH_401"
+
+# 14. Disallowed redirect_uri Rejected
+[ "$BRIEF" != "1" ] && echo -e "\n${BLUE}14. Redirect URI Validation${NC}"
+BAD_REDIRECT=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X POST \
+  "$PROXY_URL/proxy/getAccessToken?code=test&redirect_uri=https://evil.example.com" \
+  -H "Origin: $ALLOWED_ORIGIN" 2>/dev/null || echo "000")
+run_test "Disallowed redirect_uri rejected" "400" "$BAD_REDIRECT"
 
 # Summary
 if [ "$BRIEF" = "1" ]; then

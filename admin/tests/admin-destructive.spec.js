@@ -13,7 +13,7 @@
  * 2. Revoke all tokens
  */
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import {
   loginToAdmin,
   clearAppState,

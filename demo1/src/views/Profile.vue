@@ -285,14 +285,16 @@ async function fetchUserProfile() {
 
 function copyToClipboard(text) {
   if (text) {
-    navigator.clipboard.writeText(text)
+    // Clipboard access can be denied (permissions, insecure context) - the
+    // copy is a convenience, not worth an uncaught rejection
+    navigator.clipboard.writeText(text).catch(() => {})
   }
 }
 
 function toggleAndCopyToken() {
   showToken.value = !showToken.value
   if (showToken.value && authStore.token) {
-    navigator.clipboard.writeText(authStore.token)
+    navigator.clipboard.writeText(authStore.token).catch(() => {})
   }
 }
 
