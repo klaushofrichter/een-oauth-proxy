@@ -28,6 +28,18 @@ describe('CORS validation', () => {
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://malicious-site.com')
   })
 
+  it('should include Vary: Origin so caches never serve one origin\'s CORS headers to another', async () => {
+    const allowed = await fetchWithMetrics('http://localhost/health', {
+      headers: { Origin: 'http://localhost:5173' }
+    })
+    expect(allowed.headers.get('Vary')).toBe('Origin')
+
+    const rejected = await fetchWithMetrics('http://localhost/health', {
+      headers: { Origin: 'https://malicious-site.com' }
+    })
+    expect(rejected.headers.get('Vary')).toBe('Origin')
+  })
+
   it('should allow requests from allowed origins', async () => {
     const response = await fetchWithMetrics('http://localhost/health', {
       headers: {
