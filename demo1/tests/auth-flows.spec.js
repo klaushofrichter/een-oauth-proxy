@@ -8,7 +8,7 @@
  * 4. Token refresh and direct login with refreshed token
  */
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import {
   navigateToLogin,
   loginWithEEN,
@@ -262,89 +262,95 @@ test.describe('Authentication Flows', () => {
     console.log('\n✅ Old token behavior test completed!\n')
   })
 
-  test('should fail login if OAuth state is invalid (CSRF protection)', async ({ page }) => {
-    console.log('\n▶️ Running Test: Invalid OAuth state (CSRF)\n')
-    test.setTimeout(MAX_TEST_TIMEOUT)
+  // Both CSRF tests below deliberately present a bad OAuth state; the app
+  // logs the rejection via console.error, which is the behavior under test
+  test.describe('with expected OAuth state rejection', () => {
+    test.use({ allowedConsoleErrors: [/Invalid OAuth state/] })
 
-    // Step 1: Inject a known 'state' into sessionStorage, simulating the start of a login flow
-    await page.goto('/')
-    await page.evaluate(() => {
-      sessionStorage.setItem('oauth_state', 'my-secret-test-state')
-    })
-    console.log('🤫 Injected known state into sessionStorage')
+    test('should fail login if OAuth state is invalid (CSRF protection)', async ({ page }) => {
+      console.log('\n▶️ Running Test: Invalid OAuth state (CSRF)\n')
+      test.setTimeout(MAX_TEST_TIMEOUT)
 
-    // Step 2: Intercept the getAccessToken call to prevent it from failing on the fake code
-    await page.route('**/proxy/getAccessToken*', async (route) => {
-      console.log('➡️ Intercepted getAccessToken call')
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          accessToken: 'fake-token-for-testing',
-          expiresIn: 3600,
-          userEmail: 'test@example.com'
+      // Step 1: Inject a known 'state' into sessionStorage, simulating the start of a login flow
+      await page.goto('/')
+      await page.evaluate(() => {
+        sessionStorage.setItem('oauth_state', 'my-secret-test-state')
+      })
+      console.log('🤫 Injected known state into sessionStorage')
+
+      // Step 2: Intercept the getAccessToken call to prevent it from failing on the fake code
+      await page.route('**/proxy/getAccessToken*', async (route) => {
+        console.log('➡️ Intercepted getAccessToken call')
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            accessToken: 'fake-token-for-testing',
+            expiresIn: 3600,
+            userEmail: 'test@example.com'
+          })
         })
       })
+
+      // Step 3: Navigate to the callback URL with a valid-looking code but an *invalid* state
+      const callbackUrl = `/?code=fake-code-for-csrf-test&state=this-is-wrong`
+      await page.goto(callbackUrl)
+      console.log(`🔀 Navigated to callback with invalid state: ${callbackUrl}`)
+
+      // Step 4: Check for the specific CSRF error message
+      // The app should detect the state mismatch and show an error.
+      await expect(page.locator('text=Invalid OAuth state')).toBeVisible({ timeout: 10000 })
+      console.log('✅ Error message displayed for invalid state')
+
+      // Verify we are still on the login page and not redirected
+      const currentUrl = page.url()
+      expect(currentUrl).not.toContain('/profile')
+      console.log('✅ Confirmed not redirected to profile')
+
+      console.log('\n✅ CSRF (state) protection test completed!\n')
     })
 
-    // Step 3: Navigate to the callback URL with a valid-looking code but an *invalid* state
-    const callbackUrl = `/?code=fake-code-for-csrf-test&state=this-is-wrong`
-    await page.goto(callbackUrl)
-    console.log(`🔀 Navigated to callback with invalid state: ${callbackUrl}`)
+    test('should fail login if OAuth state is missing (CSRF protection)', async ({ page }) => {
+      console.log('\n▶️ Running Test: Missing OAuth state (CSRF)\n')
+      test.setTimeout(MAX_TEST_TIMEOUT)
 
-    // Step 4: Check for the specific CSRF error message
-    // The app should detect the state mismatch and show an error.
-    await expect(page.locator('text=Invalid OAuth state')).toBeVisible({ timeout: 10000 })
-    console.log('✅ Error message displayed for invalid state')
+      // Step 1: Inject a known 'state' into sessionStorage, simulating the start of a login flow
+      await page.goto('/')
+      await page.evaluate(() => {
+        sessionStorage.setItem('oauth_state', 'my-secret-test-state')
+      })
+      console.log('🤫 Injected known state into sessionStorage')
 
-    // Verify we are still on the login page and not redirected
-    const currentUrl = page.url()
-    expect(currentUrl).not.toContain('/profile')
-    console.log('✅ Confirmed not redirected to profile')
-
-    console.log('\n✅ CSRF (state) protection test completed!\n')
-  })
-
-  test('should fail login if OAuth state is missing (CSRF protection)', async ({ page }) => {
-    console.log('\n▶️ Running Test: Missing OAuth state (CSRF)\n')
-    test.setTimeout(MAX_TEST_TIMEOUT)
-
-    // Step 1: Inject a known 'state' into sessionStorage, simulating the start of a login flow
-    await page.goto('/')
-    await page.evaluate(() => {
-      sessionStorage.setItem('oauth_state', 'my-secret-test-state')
-    })
-    console.log('🤫 Injected known state into sessionStorage')
-
-    // Step 2: Intercept the getAccessToken call to prevent it from failing on the fake code
-    await page.route('**/proxy/getAccessToken*', async (route) => {
-      console.log('➡️ Intercepted getAccessToken call')
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          accessToken: 'fake-token-for-testing',
-          expiresIn: 3600,
-          userEmail: 'test@example.com'
+      // Step 2: Intercept the getAccessToken call to prevent it from failing on the fake code
+      await page.route('**/proxy/getAccessToken*', async (route) => {
+        console.log('➡️ Intercepted getAccessToken call')
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            accessToken: 'fake-token-for-testing',
+            expiresIn: 3600,
+            userEmail: 'test@example.com'
+          })
         })
       })
+
+      // Step 3: Navigate to the callback URL with a code but NO state parameter
+      const callbackUrl = `/?code=fake-code-for-csrf-test`
+      await page.goto(callbackUrl)
+      console.log(`🔀 Navigated to callback with missing state: ${callbackUrl}`)
+
+      // Step 4: Check for the specific CSRF error message
+      // The app should detect the missing state and show an error.
+      await expect(page.locator('text=Invalid OAuth state')).toBeVisible({ timeout: 10000 })
+      console.log('✅ Error message displayed for missing state')
+
+      // Verify we are still on the login page and not redirected
+      const currentUrl = page.url()
+      expect(currentUrl).not.toContain('/profile')
+      console.log('✅ Confirmed not redirected to profile')
+
+      console.log('\n✅ Missing state protection test completed!\n')
     })
-
-    // Step 3: Navigate to the callback URL with a code but NO state parameter
-    const callbackUrl = `/?code=fake-code-for-csrf-test`
-    await page.goto(callbackUrl)
-    console.log(`🔀 Navigated to callback with missing state: ${callbackUrl}`)
-
-    // Step 4: Check for the specific CSRF error message
-    // The app should detect the missing state and show an error.
-    await expect(page.locator('text=Invalid OAuth state')).toBeVisible({ timeout: 10000 })
-    console.log('✅ Error message displayed for missing state')
-
-    // Verify we are still on the login page and not redirected
-    const currentUrl = page.url()
-    expect(currentUrl).not.toContain('/profile')
-    console.log('✅ Confirmed not redirected to profile')
-
-    console.log('\n✅ Missing state protection test completed!\n')
   })
 })

@@ -1,7 +1,7 @@
 {
   "name": "een-oauth-admin",
   "displayName": "EEN OAuth Proxy Admin",
-  "version": "1.1.4",
+  "version": "1.1.7",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,8 @@
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed",
     "test:unit": "vitest run",
-    "test:unit:watch": "vitest"
+    "test:unit:watch": "vitest",
+    "test:prod": "URL=$(grep \"^VITE_PROXY_URL=\" .env.prod | cut -d= -f2- | tr -d \"\\\"\\r\" ); if [ -z \"$URL\" ]; then echo \"Error: VITE_PROXY_URL not found in .env.prod - refusing to run production tests against a fallback URL\" >&2; exit 1; fi; E2E_PROD=1 VITE_PROXY_URL=\"$URL\" playwright test"
   },
   "dependencies": {
     "pinia": "^3.0.4",
