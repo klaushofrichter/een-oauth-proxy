@@ -241,9 +241,13 @@ describe('Security - CORS Bypass Attempts', () => {
     expect(response.status).toBeGreaterThanOrEqual(200)
 
     const allowOrigin = response.headers.get('Access-Control-Allow-Origin')
-    // Should not echo back malicious origins
-    if (allowOrigin && allowOrigin !== '*') {
-      expect(allowOrigin).not.toContain('evil.com')
+    // A disallowed origin may be echoed only on the static 403 rejection
+    // (lets the calling page read the error instead of a generic CORS
+    // failure) - never on a response carrying data
+    if (allowOrigin && allowOrigin !== '*' && allowOrigin.includes('evil.com')) {
+      expect(response.status).toBe(403)
+      const text = await response.text()
+      expect(text).toContain('Forbidden')
     }
   })
 })
@@ -790,6 +794,22 @@ describe('Security - CSRF Protection', () => {
     expect(response.status).toBe(403)
     const text = await response.text()
     expect(text).toContain('Origin header required')
+  })
+
+  it('should include CORS headers on Origin-required rejections so clients can read the error', async () => {
+    const response = await fetchWithMetrics(
+      'http://localhost/proxy/getAccessToken?code=test&redirect_uri=http://localhost:5173',
+      {
+        method: 'POST'
+        // No Origin header
+      }
+    )
+
+    expect(response.status).toBe(403)
+    // No origin to echo, so '*' lets a stripped-Origin client read the
+    // explanation. Credentials must not be allowed with a wildcard origin.
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    expect(response.headers.get('Access-Control-Allow-Credentials')).toBeNull()
   })
 
   it('should reject DELETE request without Origin header', async () => {
