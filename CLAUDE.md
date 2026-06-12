@@ -66,7 +66,9 @@ cd demo1 && npm test             # Playwright E2E tests
 npm test                         # Runs scripts/run-all-tests.sh (proxy + demo1 + admin sequentially)
 ```
 
-Admin and demo1 share port 3333 — they cannot run simultaneously (this is intentional due to OAuth redirect URI constraints).
+Admin and demo1 share port 3333 — they cannot run simultaneously. **Port 3333 is required and must never be changed**: the OAuth redirect URL registered with EEN is fixed to `http://127.0.0.1:3333`, so both apps are forced onto that port. Do not propose splitting the apps onto different ports.
+
+Caveat for Playwright runs: because of the shared port and `reuseExistingServer: true`, a stale dev server from the *other* app on 3333 gets silently reused, and the suite then runs against the wrong app — failures show up as misleading element timeouts, not a clear error. If E2E tests fail oddly, check what is serving 3333 (`lsof -i :3333`) and kill it before re-running.
 
 ## Testing
 
