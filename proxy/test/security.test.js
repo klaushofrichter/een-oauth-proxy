@@ -214,9 +214,9 @@ describe('Security - CORS Bypass Attempts', () => {
     // Null origin
     { origin: 'null', description: 'null origin' },
     // Origin with trailing characters
-    { origin: 'http://localhost:5173.evil.com', description: 'subdomain trick' },
+    { origin: 'http://localhost:5173.evil.com', description: 'subdomain trick', disallowedEcho: true },
     // Origin manipulation
-    { origin: 'http://localhost:5173%00.evil.com', description: 'null byte in origin' },
+    { origin: 'http://localhost:5173%00.evil.com', description: 'null byte in origin', disallowedEcho: true },
     // Case sensitivity
     { origin: 'HTTP://LOCALHOST:5173', description: 'uppercase origin' },
     // Whitespace
@@ -230,7 +230,7 @@ describe('Security - CORS Bypass Attempts', () => {
     { origin: 'http://127.0.0.1:5173', description: 'IP instead of localhost' },
   ]
 
-  it.each(bypassAttempts)('should handle origin: $description', async ({ origin }) => {
+  it.each(bypassAttempts)('should handle origin: $description', async ({ origin, disallowedEcho }) => {
     const response = await fetchWithMetrics('http://localhost/proxy/getAccessToken?code=test&redirect_uri=http://test.com', {
       method: 'POST',
       headers: { Origin: origin }
@@ -240,14 +240,17 @@ describe('Security - CORS Bypass Attempts', () => {
     // The key is it shouldn't crash and shouldn't allow unauthorized origins
     expect(response.status).toBeGreaterThanOrEqual(200)
 
-    const allowOrigin = response.headers.get('Access-Control-Allow-Origin')
     // A disallowed origin may be echoed only on the static 403 rejection
     // (lets the calling page read the error instead of a generic CORS
-    // failure) - never on a response carrying data
-    if (allowOrigin && allowOrigin !== '*' && allowOrigin.includes('evil.com')) {
-      expect(response.status).toBe(403)
-      const text = await response.text()
-      expect(text).toContain('Forbidden')
+    // failure) - never on a response carrying data. Match the echoed value
+    // exactly against the request origin rather than substring-scanning it.
+    if (disallowedEcho) {
+      const allowOrigin = response.headers.get('Access-Control-Allow-Origin')
+      if (allowOrigin === origin) {
+        expect(response.status).toBe(403)
+        const text = await response.text()
+        expect(text).toContain('Forbidden')
+      }
     }
   })
 })
