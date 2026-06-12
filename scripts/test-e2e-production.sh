@@ -33,8 +33,15 @@ NC='\033[0m'
 FAILED=0
 
 cleanup() {
-  # Stop whatever is on the app port; the apps' own npm scripts also do this
-  lsof -ti :3333 2>/dev/null | xargs kill 2>/dev/null || true
+  # Stop the dev servers the test runs spawn. Only node/vite processes are
+  # killed so an unrelated process that happens to own port 3333 is left
+  # alone, and the whole step is skipped when lsof is unavailable.
+  command -v lsof >/dev/null 2>&1 || return 0
+  for pid in $(lsof -ti :3333 2>/dev/null); do
+    if ps -o comm= -p "$pid" 2>/dev/null | grep -qE 'node|vite'; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
 }
 trap cleanup EXIT
 

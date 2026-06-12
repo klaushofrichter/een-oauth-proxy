@@ -7,6 +7,9 @@
  * framework error in the browser fails the test even when the UI flow
  * happens to succeed (the class of failure behind issue #125 surfaced only
  * in the console).
+ *
+ * NOTE: this file is duplicated in admin/tests/ and demo1/tests/ - keep
+ * both copies in sync.
  */
 
 import { test as base, expect } from '@playwright/test'
@@ -23,6 +26,10 @@ const IGNORED_CONSOLE_PATTERNS = [
 // own uncaught exceptions - those are not ours to fix.
 const APP_ORIGINS = ['http://127.0.0.1:3333', 'http://localhost:3333']
 
+// Caveat: page.url() reflects the URL at event-fire time, not where the
+// error originated, so an error landing mid-navigation can be misattributed.
+// Acceptable for this flow - errors during the brief OAuth redirects are
+// dropped rather than failing tests spuriously.
 function isAppPage(page) {
   const url = page.url()
   return APP_ORIGINS.some((origin) => url.startsWith(origin))

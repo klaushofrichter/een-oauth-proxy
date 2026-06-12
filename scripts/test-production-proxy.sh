@@ -151,6 +151,8 @@ INVALID_ORIGIN_HEADERS=$(curl -s -i --max-time 10 "$PROXY_URL/health" \
   -H "Origin: https://malicious-site.com" 2>/dev/null || echo "")
 run_test_contains "403 echoes rejected origin in ACAO" "access-control-allow-origin: https://malicious-site.com" "$INVALID_ORIGIN_HEADERS"
 run_test_contains "403 includes Vary: Origin" "vary: origin" "$INVALID_ORIGIN_HEADERS"
+# Note: $(...) strips the trailing newline, which is what makes the exact
+# string comparison below work
 INVALID_ORIGIN_BODY=$(curl -s --max-time 10 "$PROXY_URL/health" \
   -H "Origin: https://malicious-site.com" 2>/dev/null || echo "")
 run_test "403 body is the exact static string" "Forbidden: Invalid origin" "$INVALID_ORIGIN_BODY"
