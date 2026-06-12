@@ -58,9 +58,8 @@ jobs:
         id: check_release
         run: |
           set -e
-          RELEASE_TAG="${{ steps.versions.outputs.release_tag }}"
           echo "🔍 Checking if release '$RELEASE_TAG' already exists..."
-          
+
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "ℹ️ Release $RELEASE_TAG already exists, skipping creation"
@@ -70,6 +69,7 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
 
       - name: Get previous release tag
         id: prev_tag
@@ -101,19 +101,25 @@ jobs:
       - name: Generate changelog
         if: steps.check_release.outputs.exists == 'false'
         run: |
-          REPO_URL="https://github.com/${{ github.repository }}"
-          if [ "${{ steps.prev_tag.outputs.has_prev }}" = "true" ]; then
-            ./scripts/generate-changelog.sh "$REPO_URL" "${{ steps.prev_tag.outputs.prev_tag }}"
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
+          if [ "$HAS_PREV" = "true" ]; then
+            ./scripts/generate-changelog.sh "$REPO_URL" "$PREV_TAG"
           else
             ./scripts/generate-changelog.sh "$REPO_URL"
           fi
+        env:
+          HAS_PREV: ${{ steps.prev_tag.outputs.has_prev }}
+          PREV_TAG: ${{ steps.prev_tag.outputs.prev_tag }}
 
       - name: Create release archive
         id: create_archive
         if: steps.check_release.outputs.exists == 'false'
+        env:
+          PROXY_VERSION: ${{ steps.versions.outputs.proxy_version }}
+          ADMIN_VERSION: ${{ steps.versions.outputs.admin_version }}
         run: |
           set -e
-          ARCHIVE_NAME="een-oauth-proxy-v${{ steps.versions.outputs.proxy_version }}_v${{ steps.versions.outputs.admin_version }}"
+          ARCHIVE_NAME="een-oauth-proxy-v${PROXY_VERSION}_v${ADMIN_VERSION}"
           echo "📦 Creating release archives with name: $ARCHIVE_NAME"
           
           echo "Creating ZIP archive..."
@@ -146,30 +152,36 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.check_release.outputs.exists == 'false' && steps.create_archive.outputs.archive_name != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE_NAME: ${{ steps.create_archive.outputs.archive_name }}
+          RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
+          ADMIN_VERSION: ${{ steps.versions.outputs.admin_version }}
+          PROXY_VERSION: ${{ steps.versions.outputs.proxy_version }}
+          ADMIN_URL: ${{ vars.VITE_REDIRECT_URI }}
+          PROXY_URL: ${{ vars.VITE_PROXY_URL }}
         run: |
           set -e
-          ARCHIVE_NAME="${{ steps.create_archive.outputs.archive_name }}"
-          RELEASE_TAG="${{ steps.versions.outputs.release_tag }}"
-          
+
           if [ -z "$ARCHIVE_NAME" ]; then
             echo "❌ Error: archive_name is not set. Cannot create release."
             exit 1
           fi
-          
+
           if [ ! -f "${ARCHIVE_NAME}.zip" ] || [ ! -f "${ARCHIVE_NAME}.tar.gz" ]; then
             echo "❌ Error: Archive files not found. Expected: ${ARCHIVE_NAME}.zip and ${ARCHIVE_NAME}.tar.gz"
             exit 1
           fi
-          
+
           echo "🚀 Creating GitHub release: $RELEASE_TAG"
           echo "📎 Attaching archives: ${ARCHIVE_NAME}.zip, ${ARCHIVE_NAME}.tar.gz"
-          
+
           # Build release notes file
           {
             echo "## EEN OAuth Proxy Release"
             echo ""
-            echo "**Admin App Version:** ${{ steps.versions.outputs.admin_version }}"
-            echo "**Proxy Version:** ${{ steps.versions.outputs.proxy_version }}"
+            echo "**Admin App Version:** $ADMIN_VERSION"
+            echo "**Proxy Version:** $PROXY_VERSION"
             echo ""
             echo "### What's Changed"
             cat changelog.md
@@ -179,120 +191,85 @@ jobs:
             echo "- \`${ARCHIVE_NAME}.tar.gz\` - TAR.GZ archive"
             echo ""
             echo "### Deployed URLs"
-            echo "- **Admin App:** ${{ vars.VITE_REDIRECT_URI }}"
-            echo "- **Proxy:** ${{ vars.VITE_PROXY_URL }}"
+            echo "- **Admin App:** ${ADMIN_URL}"
+            echo "- **Proxy:** ${PROXY_URL}"
           } > release_notes.md
 
           echo "📝 Release notes:"
           cat release_notes.md
 
           if ! gh release create "$RELEASE_TAG" \
-            --title "Proxy v${{ steps.versions.outputs.proxy_version }} / Admin v${{ steps.versions.outputs.admin_version }}" \
+            --title "Proxy v${PROXY_VERSION} / Admin v${ADMIN_VERSION}" \
             --notes-file release_notes.md \
             "${ARCHIVE_NAME}.zip" \
             "${ARCHIVE_NAME}.tar.gz"; then
             echo "❌ Error: Failed to create GitHub release"
             exit 1
           fi
-          
+
           echo "✅ Successfully created release: $RELEASE_TAG"
-          echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "🔗 Release URL: https://github.com/${GITHUB_REPOSITORY}/releases/tag/$RELEASE_TAG"
 
       - name: Notify Slack
         if: steps.check_release.outputs.exists == 'false'
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
+          PROXY_VERSION: ${{ steps.versions.outputs.proxy_version }}
+          ADMIN_VERSION: ${{ steps.versions.outputs.admin_version }}
+          ADMIN_URL: ${{ vars.VITE_REDIRECT_URI }}
+          PROXY_URL: ${{ vars.VITE_PROXY_URL }}
         run: |
-          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${{ steps.versions.outputs.release_tag }}"
+          set -o pipefail
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
           RELEASE_TIME=$(TZ='America/Chicago' date +"%Y-%m-%d %H:%M:%S CT")
 
-          curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
+          # Build JSON safely using jq to prevent injection via special characters
+          jq -n \
+            --arg title "New Release: Proxy v${PROXY_VERSION} / Admin v${ADMIN_VERSION}" \
+            --arg admin_ver "$ADMIN_VERSION" \
+            --arg proxy_ver "$PROXY_VERSION" \
+            --arg release_time "$RELEASE_TIME" \
+            --arg repo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --arg repo_name "$GITHUB_REPOSITORY" \
+            --arg admin_url "$ADMIN_URL" \
+            --arg proxy_url "$PROXY_URL" \
+            --arg release_url "$RELEASE_URL" \
+            '{
+              blocks: [
+                {type: "header", text: {type: "plain_text", text: $title, emoji: true}},
+                {type: "section", fields: [
+                  {type: "mrkdwn", text: ("*Admin Version:*\n" + $admin_ver)},
+                  {type: "mrkdwn", text: ("*Proxy Version:*\n" + $proxy_ver)},
+                  {type: "mrkdwn", text: ("*Released:*\n" + $release_time)},
+                  {type: "mrkdwn", text: ("*Repository:*\n<" + $repo + "|" + $repo_name + ">")}
+                ]},
+                {type: "section", text: {type: "mrkdwn", text: ("*Deployed URLs:*\n• <" + $admin_url + "|Admin App>\n• <" + $proxy_url + "|OAuth Proxy>")}},
+                {type: "actions", elements: [
+                  {type: "button", text: {type: "plain_text", text: "View Release", emoji: true}, url: $release_url, style: "primary"},
+                  {type: "button", text: {type: "plain_text", text: "Release Notes", emoji: true}, url: $release_url}
+                ]},
+                {type: "context", elements: [{type: "mrkdwn", text: "Triggered by GitHub Actions \u2022 Workflow: Create Release"}]}
+              ]
+            }' | curl -sf -X POST "$SLACK_WEBHOOK" \
             -H "Content-Type: application/json" \
-            -d @- << EOF
-          {
-            "blocks": [
-              {
-                "type": "header",
-                "text": {
-                  "type": "plain_text",
-                  "text": "🚀 New Release: Proxy v${{ steps.versions.outputs.proxy_version }} / Admin v${{ steps.versions.outputs.admin_version }}",
-                  "emoji": true
-                }
-              },
-              {
-                "type": "section",
-                "fields": [
-                  {
-                    "type": "mrkdwn",
-                    "text": "*Admin Version:*\n${{ steps.versions.outputs.admin_version }}"
-                  },
-                  {
-                    "type": "mrkdwn",
-                    "text": "*Proxy Version:*\n${{ steps.versions.outputs.proxy_version }}"
-                  },
-                  {
-                    "type": "mrkdwn",
-                    "text": "*Released:*\n${RELEASE_TIME}"
-                  },
-                  {
-                    "type": "mrkdwn",
-                    "text": "*Repository:*\n<${{ github.server_url }}/${{ github.repository }}|${{ github.repository }}>"
-                  }
-                ]
-              },
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "*Deployed URLs:*\n• <${{ vars.VITE_REDIRECT_URI }}|Admin App>\n• <${{ vars.VITE_PROXY_URL }}|OAuth Proxy>"
-                }
-              },
-              {
-                "type": "actions",
-                "elements": [
-                  {
-                    "type": "button",
-                    "text": {
-                      "type": "plain_text",
-                      "text": "📦 View Release",
-                      "emoji": true
-                    },
-                    "url": "${RELEASE_URL}",
-                    "style": "primary"
-                  },
-                  {
-                    "type": "button",
-                    "text": {
-                      "type": "plain_text",
-                      "text": "📋 Release Notes",
-                      "emoji": true
-                    },
-                    "url": "${RELEASE_URL}"
-                  }
-                ]
-              },
-              {
-                "type": "context",
-                "elements": [
-                  {
-                    "type": "mrkdwn",
-                    "text": "Triggered by GitHub Actions • Workflow: Create Release"
-                  }
-                ]
-              }
-            ]
-          }
-          EOF
+            -d @-
           echo "✅ Slack notification sent"
 
       - name: Summary
+        env:
+          RELEASE_EXISTS: ${{ steps.check_release.outputs.exists }}
+          RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
+          ADMIN_VERSION: ${{ steps.versions.outputs.admin_version }}
+          PROXY_VERSION: ${{ steps.versions.outputs.proxy_version }}
         run: |
-          if [ "${{ steps.check_release.outputs.exists }}" = "true" ]; then
+          if [ "$RELEASE_EXISTS" = "true" ]; then
             echo "### ⏭️ Release Skipped" >> $GITHUB_STEP_SUMMARY
-            echo "Release ${{ steps.versions.outputs.release_tag }} already exists." >> $GITHUB_STEP_SUMMARY
+            echo "Release $RELEASE_TAG already exists." >> $GITHUB_STEP_SUMMARY
           else
             echo "### ✅ Release Created" >> $GITHUB_STEP_SUMMARY
-            echo "**Tag:** ${{ steps.versions.outputs.release_tag }}" >> $GITHUB_STEP_SUMMARY
-            echo "**Admin Version:** ${{ steps.versions.outputs.admin_version }}" >> $GITHUB_STEP_SUMMARY
-            echo "**Proxy Version:** ${{ steps.versions.outputs.proxy_version }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Tag:** $RELEASE_TAG" >> $GITHUB_STEP_SUMMARY
+            echo "**Admin Version:** $ADMIN_VERSION" >> $GITHUB_STEP_SUMMARY
+            echo "**Proxy Version:** $PROXY_VERSION" >> $GITHUB_STEP_SUMMARY
           fi

@@ -211,39 +211,42 @@ describe('Security - Session Management', () => {
 
 describe('Security - CORS Bypass Attempts', () => {
   const bypassAttempts = [
-    // Null origin
+    // Disallowed origins: must get the static 403 rejection. The proxy
+    // echoes the rejected origin so the caller can read the error - that
+    // echo is only ever permitted on this static 403, never on a data response.
     { origin: 'null', description: 'null origin' },
-    // Origin with trailing characters
     { origin: 'http://localhost:5173.evil.com', description: 'subdomain trick' },
-    // Origin manipulation
     { origin: 'http://localhost:5173%00.evil.com', description: 'null byte in origin' },
-    // Case sensitivity
     { origin: 'HTTP://LOCALHOST:5173', description: 'uppercase origin' },
-    // Whitespace
-    { origin: ' http://localhost:5173', description: 'leading whitespace' },
-    { origin: 'http://localhost:5173 ', description: 'trailing whitespace' },
-    // Protocol manipulation
     { origin: 'https://localhost:5173', description: 'https instead of http' },
-    // Port manipulation
     { origin: 'http://localhost:5174', description: 'different port' },
-    // Host manipulation
     { origin: 'http://127.0.0.1:5173', description: 'IP instead of localhost' },
+    // The Headers API strips leading/trailing whitespace from header values,
+    // so these arrive as the allowed origin and must proceed past origin
+    // validation, reflecting only the exact allowlisted value
+    { origin: ' http://localhost:5173', description: 'leading whitespace', normalizesToAllowed: true },
+    { origin: 'http://localhost:5173 ', description: 'trailing whitespace', normalizesToAllowed: true },
   ]
 
-  it.each(bypassAttempts)('should handle origin: $description', async ({ origin }) => {
+  it.each(bypassAttempts)('should handle origin: $description', async ({ origin, normalizesToAllowed }) => {
     const response = await fetchWithMetrics('http://localhost/proxy/getAccessToken?code=test&redirect_uri=http://test.com', {
       method: 'POST',
       headers: { Origin: origin }
     })
 
-    // Either forbidden (403) or the request proceeds with proper CORS headers
-    // The key is it shouldn't crash and shouldn't allow unauthorized origins
-    expect(response.status).toBeGreaterThanOrEqual(200)
-
     const allowOrigin = response.headers.get('Access-Control-Allow-Origin')
-    // Should not echo back malicious origins
-    if (allowOrigin && allowOrigin !== '*') {
-      expect(allowOrigin).not.toContain('evil.com')
+    if (normalizesToAllowed) {
+      // Proceeds past origin validation (may still fail later for other
+      // reasons, but never as an origin rejection) and the reflected origin
+      // is exactly the allowlisted value
+      expect(response.status).not.toBe(403)
+      expect(allowOrigin).toBe('http://localhost:5173')
+    } else {
+      // The static 403 rejection, echoing exactly the rejected origin
+      expect(response.status).toBe(403)
+      expect(allowOrigin).toBe(origin)
+      const text = await response.text()
+      expect(text).toContain('Forbidden')
     }
   })
 })
@@ -790,6 +793,22 @@ describe('Security - CSRF Protection', () => {
     expect(response.status).toBe(403)
     const text = await response.text()
     expect(text).toContain('Origin header required')
+  })
+
+  it('should include CORS headers on Origin-required rejections so clients can read the error', async () => {
+    const response = await fetchWithMetrics(
+      'http://localhost/proxy/getAccessToken?code=test&redirect_uri=http://localhost:5173',
+      {
+        method: 'POST'
+        // No Origin header
+      }
+    )
+
+    expect(response.status).toBe(403)
+    // No origin to echo, so '*' lets a stripped-Origin client read the
+    // explanation. Credentials must not be allowed with a wildcard origin.
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*')
+    expect(response.headers.get('Access-Control-Allow-Credentials')).toBeNull()
   })
 
   it('should reject DELETE request without Origin header', async () => {
