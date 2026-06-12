@@ -331,7 +331,7 @@ jobs:
           PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Build JSON safely using jq to prevent injection via special characters
-          WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           jq -n \
             --arg version "$PACKAGE_VERSION" \
             --arg health_url "${PROXY_URL}/health" \
@@ -372,7 +372,7 @@ jobs:
             ROLLBACK_STATUS=" (rollback not possible - no previous version)"
           fi
           # Build JSON safely using jq to prevent injection via special characters
-          WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          WORKFLOW_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           jq -n \
             --arg title "Proxy Deployment Failed${ROLLBACK_STATUS}" \
             --arg version "$VERSION" \

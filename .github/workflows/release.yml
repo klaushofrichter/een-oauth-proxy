@@ -101,7 +101,7 @@ jobs:
       - name: Generate changelog
         if: steps.check_release.outputs.exists == 'false'
         run: |
-          REPO_URL="https://github.com/${{ github.repository }}"
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
           if [ "$HAS_PREV" = "true" ]; then
             ./scripts/generate-changelog.sh "$REPO_URL" "$PREV_TAG"
           else
@@ -206,17 +206,18 @@ jobs:
           fi
 
           echo "✅ Successfully created release: $RELEASE_TAG"
-          echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
+          echo "🔗 Release URL: https://github.com/${GITHUB_REPOSITORY}/releases/tag/$RELEASE_TAG"
 
       - name: Notify Slack
         if: steps.check_release.outputs.exists == 'false'
+        continue-on-error: true
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
           PROXY_VERSION: ${{ steps.versions.outputs.proxy_version }}
           ADMIN_VERSION: ${{ steps.versions.outputs.admin_version }}
         run: |
-          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}"
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
           RELEASE_TIME=$(TZ='America/Chicago' date +"%Y-%m-%d %H:%M:%S CT")
 
           # Build JSON safely using jq to prevent injection via special characters
@@ -225,8 +226,8 @@ jobs:
             --arg admin_ver "$ADMIN_VERSION" \
             --arg proxy_ver "$PROXY_VERSION" \
             --arg release_time "$RELEASE_TIME" \
-            --arg repo "${{ github.server_url }}/${{ github.repository }}" \
-            --arg repo_name "${{ github.repository }}" \
+            --arg repo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --arg repo_name "$GITHUB_REPOSITORY" \
             --arg admin_url "${{ vars.VITE_REDIRECT_URI }}" \
             --arg proxy_url "${{ vars.VITE_PROXY_URL }}" \
             --arg release_url "$RELEASE_URL" \
