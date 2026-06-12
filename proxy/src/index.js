@@ -342,13 +342,25 @@ export default {
     // Validate origin
     const corsResult = validateOrigin(origin, env)
     if (!corsResult.valid) {
-      return new Response('Forbidden: Invalid origin', { status: 403 })
+      // Echo the rejected origin in CORS headers so the calling page can read
+      // this rejection instead of a generic CORS failure. This grants nothing:
+      // the body is static and every request re-validates the origin.
+      return addCorsHeaders(
+        new Response('Forbidden: Invalid origin', { status: 403 }),
+        origin || '*',
+        env
+      )
     }
 
     // CSRF protection: Require Origin header for state-changing requests
     // Requests without Origin (e.g., curl) are blocked for POST/DELETE to prevent CSRF
     if ((request.method === 'POST' || request.method === 'DELETE') && !origin) {
-      return new Response('Forbidden: Origin header required', { status: 403 })
+      // '*' (no credentials) lets a stripped-Origin client read the explanation
+      return addCorsHeaders(
+        new Response('Forbidden: Origin header required', { status: 403 }),
+        '*',
+        env
+      )
     }
 
     // Rate limiting check - applies to all requests including OPTIONS preflight

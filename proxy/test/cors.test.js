@@ -14,6 +14,20 @@ describe('CORS validation', () => {
     expect(text).toContain('Forbidden')
   })
 
+  it('should include CORS headers on disallowed-origin rejections so clients can read the error', async () => {
+    const response = await fetchWithMetrics('http://localhost/health', {
+      headers: {
+        Origin: 'https://malicious-site.com'
+      }
+    })
+
+    expect(response.status).toBe(403)
+    // The rejected origin is echoed so the calling page can read the 403 body
+    // instead of seeing a generic CORS failure. This grants nothing: the body
+    // is a static string and every request re-validates the origin.
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://malicious-site.com')
+  })
+
   it('should allow requests from allowed origins', async () => {
     const response = await fetchWithMetrics('http://localhost/health', {
       headers: {
