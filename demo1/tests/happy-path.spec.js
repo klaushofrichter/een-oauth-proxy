@@ -9,7 +9,7 @@
  * 5. Logout and verify return to login page
  */
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { loginToApplication, logoutFromApplication, captureCredentialsFromProfile, MAX_TEST_TIMEOUT } from './utils.js'
 
 test.describe('Happy Path - OAuth Login Flow', () => {

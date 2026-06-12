@@ -29,8 +29,10 @@ export default defineConfig({
   ],
 
   // Run local dev server before tests
+  // E2E_PROD=1 (set by npm run test:prod) starts the app with production
+  // config so the tests run against the deployed proxy
   webServer: {
-    command: 'npm run dev',
+    command: process.env.E2E_PROD === '1' ? 'npm run dev:prod' : 'npm run dev',
     url: 'http://127.0.0.1:3333',
     reuseExistingServer: !process.env.CI,
     timeout: 120000,

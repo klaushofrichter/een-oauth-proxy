@@ -8,7 +8,7 @@
  * 4. Logout flow
  */
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import {
   loginToAdmin,
   logoutFromAdmin,
